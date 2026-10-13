@@ -282,7 +282,9 @@ function dVal(f){const s=dAgg[f.properties.district];return dMetric==='emp'?s.em
 function qbreaks(vals){const v=vals.filter(x=>x>0).sort((a,b)=>a-b);if(!v.length)return[1,2,3,4,5];
   const q=p=>{const i=(v.length-1)*p,lo=Math.floor(i),hi=Math.ceil(i);return Math.round(v[lo]+(v[hi]-v[lo])*(i-lo));};
   return[...new Set([1,q(.2),q(.4),q(.6),q(.8)])];}
-function dColor(v){if(v<=0)return cssv('--zero');const r=DRAMP[dMetric];let i=1;for(const b of dBreaks.slice(1)){if(v>=b)i++;}return r[Math.min(i,r.length-1)];}
+function dColor(v){if(v<=0)return cssv('--zero');
+  if(dMetric==='ret'){ if(v<30) return '#fca5a5'; const rr=DRAMP.ret; let i=1; for(const b of [50,100,200]){if(v>=b)i++;} return rr[Math.min(i,rr.length-1)]; }
+  const r=DRAMP[dMetric];let i=1;for(const b of dBreaks.slice(1)){if(v>=b)i++;}return r[Math.min(i,r.length-1)];}
 function initDistrict(){
   MAPS.dist=L.map('map-dist',{zoomControl:true,attributionControl:false});
   dDraw(); MAPS.dist.fitBounds(dLayer.getBounds(),{padding:[12,12]});
@@ -305,6 +307,15 @@ function dSetInfo(f){const s=dAgg[f.properties.district];
     '<dt>Unique employees</dt><dd class="emp">'+nf(s.empN)+'</dd><dt>Total check-ins</dt><dd>'+nf(s.checks)+'</dd></dl>'+
     (s.checks===0?'<div class="s" style="margin-top:6px;color:var(--dist)">No check-in — expansion opportunity</div>':'');}
 function dLegend(){const r=DRAMP[dMetric],nm={checks:'Total check-ins',ret:'Unique retailers',dist:'Unique distributors',emp:'Unique employees'}[dMetric];
+  if(dMetric==='ret'){ const rr=DRAMP.ret;
+    document.getElementById('dLegend').innerHTML='<h4>'+nm+'</h4>'+
+      '<div class="row"><span class="sw" style="background:#fca5a5"></span>Under 30 (low)</div>'+
+      '<div class="row"><span class="sw" style="background:'+rr[1]+'"></span>30–49</div>'+
+      '<div class="row"><span class="sw" style="background:'+rr[2]+'"></span>50–99</div>'+
+      '<div class="row"><span class="sw" style="background:'+rr[3]+'"></span>100–199</div>'+
+      '<div class="row"><span class="sw" style="background:'+rr[4]+'"></span>200+</div>'+
+      '<div class="row"><span class="sw" style="background:'+cssv('--zero')+'"></span>No check-in</div>';
+    return; }
   let out='<h4>'+nm+'</h4>',b=dBreaks,segs=[{c:r[1],t:'1–'+((b[1]||2)-1)}];
   for(let i=1;i<b.length;i++){const lo=b[i],hi=b[i+1]?b[i+1]-1:null;segs.push({c:r[Math.min(r.length-1,i+1)],t:hi?(lo+'–'+hi):(lo+'+')});}
   const seen=new Set();for(const s of segs){const k=s.c+s.t;if(seen.has(k))continue;seen.add(k);out+='<div class="row"><span class="sw" style="background:'+s.c+'"></span>'+s.t+'</div>';}
@@ -317,6 +328,12 @@ function initCheckin(){
   MAPS.pin=L.map('map-pin',{preferCanvas:true,zoomControl:true,attributionControl:false}).fitBounds(RJ_BOUNDS);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{subdomains:'abc',maxZoom:19}).addTo(MAPS.pin);
   document.querySelector('#p-checkin .leaflet-tile-pane').classList.add('dim');
+  // Highlight Rajasthan: dim everything outside the state (spotlight) + outline districts.
+  const world=[[85,-179],[85,179],[-85,179],[-85,-179]], holes=[];
+  for(const f of GEO.features){ const g=f.geometry, polys=g.type==='Polygon'?[g.coordinates]:g.coordinates;
+    for(const poly of polys) holes.push(poly[0].map(c=>[c[1],c[0]])); }
+  L.polygon([world,...holes],{stroke:false,fillColor:'#0a0f1e',fillOpacity:0.6,interactive:false,className:'raj-mask'}).addTo(MAPS.pin);
+  L.geoJSON(GEO,{interactive:false,style:{fill:false,weight:1,color:'#818cf8',opacity:0.65}}).addTo(MAPS.pin);
   cCluster=L.markerClusterGroup({maxClusterRadius:46,showCoverageOnHover:false,chunkedLoading:true});
   const sel=document.getElementById('cDistrict');
   const ds=[...new Set(SHOPS.map(s=>s.dist).filter(Boolean))].map(dName).sort();
@@ -425,7 +442,11 @@ function initShopTable(tab,kind){
 }
 
 /* boot */
-show('overview');
+const _tabs=['overview','district','checkin','overtime','employees','retailers','distributors'];
+const [_bt,_bm]=location.hash.replace('#','').split(':');
+show(_tabs.includes(_bt)?_bt:'overview');
+if(_bt==='district'&&['checks','ret','dist','emp'].includes(_bm)){dMetric=_bm;
+  document.querySelectorAll('#dMetric button').forEach(x=>x.classList.toggle('on',x.dataset.v===_bm));dDraw();}
 window.addEventListener('resize',()=>{for(const k in MAPS)if(MAPS[k])MAPS[k].invalidateSize();});
 </script>
 </body>
