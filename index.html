@@ -79,6 +79,17 @@ header{background:var(--panel);border-bottom:1px solid var(--line);z-index:1200;
 .seg.met button.on[data-v="ret"]{background:var(--ret)} .seg.met button.on[data-v="dist"]{background:var(--dist)} .seg.met button.on[data-v="emp"]{background:var(--emp)}
 select,input[type=search],input[type=number]{background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:inherit;font-size:12.5px}
 input[type=number]{width:66px}
+.msel{position:relative;display:inline-block}
+.mselbtn{background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:6px 24px 6px 10px;font:inherit;font-size:12.5px;cursor:pointer;min-width:150px;max-width:210px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;position:relative}
+.mselbtn::after{content:'▾';position:absolute;right:9px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:10px}
+.mselbtn.active{border-color:var(--accent);color:var(--accent)}
+.mselpanel{position:absolute;top:calc(100% + 4px);left:0;z-index:900;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);width:230px;padding:8px}
+.mselq{width:100%;margin-bottom:6px}
+.mselact{display:flex;gap:8px;margin-bottom:6px}
+.mselact button{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:4px 6px;font:inherit;font-size:11px;cursor:pointer}
+.msellist{max-height:230px;overflow:auto;display:flex;flex-direction:column;gap:1px}
+.mrow{display:flex;align-items:center;gap:7px;padding:4px 6px;border-radius:6px;font-size:12.5px;cursor:pointer}
+.mrow:hover{background:var(--panel2)} .mrow input{flex:0 0 auto}
 .mapwrapper{position:absolute;top:46px;left:0;right:0;bottom:0}
 /* info/legend overlays */
 .legend{position:absolute;left:12px;bottom:12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 11px;z-index:700;font-size:11.5px;box-shadow:var(--shadow)}
@@ -148,7 +159,7 @@ table.dt tbody tr:hover{background:var(--panel2)}
         <button data-v="emp">Employees</button>
       </div>
       <label class="lbl" style="display:flex;gap:5px;align-items:center;text-transform:none;font-size:12.5px;color:var(--fg)"><input type="checkbox" id="dLabels" checked> Names</label>
-      <span class="lbl">Employee</span><input type="search" id="dEmp" list="dEmpList" placeholder="All employees" style="min-width:150px"><datalist id="dEmpList"></datalist>
+      <span class="lbl">Employee</span><div class="msel" id="dEmpSel"></div>
     </div>
     <div class="mapwrapper"><div class="lmap" id="map-dist"></div>
       <div class="info" id="dInfo"><h3>Hover a district</h3><div class="s">retailers · distributors · employees · check-ins</div></div>
@@ -161,7 +172,7 @@ table.dt tbody tr:hover{background:var(--panel2)}
       <span class="lbl">Type</span>
       <div class="seg types" id="cType"><button data-v="all" class="on">All</button><button data-v="r">Retailers</button><button data-v="d">Distributors</button></div>
       <span class="lbl">District</span><select id="cDistrict"></select>
-      <span class="lbl">Employee</span><input type="search" id="cEmp" list="cEmpList" placeholder="All employees" style="min-width:150px"><datalist id="cEmpList"></datalist>
+      <span class="lbl">Employee</span><div class="msel" id="cEmpSel"></div>
       <span class="lbl">Min check-ins</span><input type="number" id="cMin" min="1" value="1">
       <div class="seg" id="cView"><button data-v="pins" class="on">Pins</button><button data-v="heat">Heatmap</button></div>
     </div>
@@ -278,18 +289,47 @@ function initOverview(){
 }
 
 /* ---------- district choropleth ---------- */
-let dLayer=null, dMetric='checks', dLabels=true, dBreaks=[], dEmp='', dEmpResolved=null;
+// Shared multi-select employee picker (one or many). Calls onChange([names]).
+const EMP_CTL={};
+function initEmpMulti(rootId,onChange){
+  const root=document.getElementById(rootId);
+  const emps=[...new Set(SHOPS.flatMap(s=>s.emps))].sort((a,b)=>a.localeCompare(b));
+  let sel=new Set();
+  root.innerHTML='<button type="button" class="mselbtn">All employees</button>'+
+    '<div class="mselpanel" hidden><input type="search" class="mselq" placeholder="Search employee…">'+
+    '<div class="mselact"><button type="button" class="mall">Select all</button><button type="button" class="mclear">Clear</button></div>'+
+    '<div class="msellist"></div></div>';
+  const btn=root.querySelector('.mselbtn'),panel=root.querySelector('.mselpanel'),q=root.querySelector('.mselq'),list=root.querySelector('.msellist');
+  const rl=()=>{const t=q.value.trim().toLowerCase();list.innerHTML=emps.filter(e=>!t||e.toLowerCase().includes(t)).map(e=>'<label class="mrow"><input type="checkbox" value="'+esc(e)+'"'+(sel.has(e)?' checked':'')+'><span>'+esc(e)+'</span></label>').join('')||'<div class="mrow" style="color:var(--muted)">No match</div>';};
+  const lab=()=>{btn.textContent=sel.size===0?'All employees':(sel.size===1?[...sel][0]:(sel.size+' selected'));btn.classList.toggle('active',sel.size>0);};
+  btn.onclick=()=>{panel.hidden=!panel.hidden;if(!panel.hidden){q.value='';rl();setTimeout(()=>q.focus(),0);}};
+  q.oninput=rl;
+  list.onchange=e=>{const cb=e.target;if(cb.type!=='checkbox')return;cb.checked?sel.add(cb.value):sel.delete(cb.value);lab();onChange([...sel]);};
+  root.querySelector('.mall').onclick=()=>{emps.forEach(e=>sel.add(e));rl();lab();onChange([...sel]);};
+  root.querySelector('.mclear').onclick=()=>{sel.clear();rl();lab();onChange([...sel]);};
+  document.addEventListener('click',ev=>{if(!root.contains(ev.target))panel.hidden=true;});
+  const api={get:()=>[...sel],set:a=>{sel=new Set(a);lab();onChange([...sel]);}};
+  EMP_CTL[rootId]=api;return api;
+}
+
+let dLayer=null, dMetric='checks', dLabels=true, dBreaks=[], dEmpSel=[], dScoped=null;
 const DRAMP={checks:['#e0e7ff','#c7d2fe','#a5b4fc','#818cf8','#6366f1','#4338ca'],ret:['#dbeafe','#bfdbfe','#93c5fd','#60a5fa','#3b82f6','#1d4ed8'],dist:['#ffedd5','#fed7aa','#fdba74','#fb923c','#f97316','#c2410c'],emp:['#d1fae5','#a7f3d0','#6ee7b7','#34d399','#10b981','#047857']};
-function resolveEmp(){ if(!dEmp) return null; const q=dEmp.toLowerCase(), keys=Object.keys(EMPDIST);
-  return keys.find(k=>k.toLowerCase()===q) || keys.find(k=>k.toLowerCase().includes(q)) || '__none__'; }
-function dStat(name){ if(dEmpResolved!==null){ const e=(EMPDIST[dEmpResolved]&&EMPDIST[dEmpResolved][name])||[0,0,0];
-    return {ret:e[0],dist:e[1],checks:e[2],empN:(e[0]+e[1]>0?1:0)}; } return dAgg[name]; }
+// Union of selected employees per district: unique shops from SHOPS (so a shop visited by two picks counts once), check-ins summed from EMPDIST (additive).
+function computeScoped(sel){
+  const set=new Set(sel), agg={};
+  for(const n of dnames) agg[n]={ret:0,dist:0,checks:0,empN:0};
+  for(const s of SHOPS){ if(!s.dist||!agg[s.dist]) continue; if(s.emps.some(e=>set.has(e))){ if(s.t==='r')agg[s.dist].ret++; else agg[s.dist].dist++; } }
+  for(const e of sel){ const ed=EMPDIST[e]; if(!ed) continue; for(const d in ed){ if(agg[d]) agg[d].checks+=ed[d][2]; } }
+  for(const n of dnames) agg[n].empN=sel.filter(e=>EMPDIST[e]&&EMPDIST[e][n]).length;
+  return agg;
+}
+function dStat(name){ return dScoped?dScoped[name]:dAgg[name]; }
 function dVal(f){const s=dStat(f.properties.district);return dMetric==='emp'?s.empN:s[dMetric];}
 function qbreaks(vals){const v=vals.filter(x=>x>0).sort((a,b)=>a-b);if(!v.length)return[1,2,3,4,5];
   const q=p=>{const i=(v.length-1)*p,lo=Math.floor(i),hi=Math.ceil(i);return Math.round(v[lo]+(v[hi]-v[lo])*(i-lo));};
   return[...new Set([1,q(.2),q(.4),q(.6),q(.8)])];}
 function dColor(v){if(v<=0)return cssv('--zero');
-  if(dMetric==='ret'&&dEmpResolved===null){ if(v<30) return '#fca5a5'; const rr=DRAMP.ret; let i=1; for(const b of [50,100,200]){if(v>=b)i++;} return rr[Math.min(i,rr.length-1)]; }
+  if(dMetric==='ret'&&!dScoped){ if(v<30) return '#fca5a5'; const rr=DRAMP.ret; let i=1; for(const b of [50,100,200]){if(v>=b)i++;} return rr[Math.min(i,rr.length-1)]; }
   const r=DRAMP[dMetric];let i=1;for(const b of dBreaks.slice(1)){if(v>=b)i++;}return r[Math.min(i,r.length-1)];}
 function initDistrict(){
   MAPS.dist=L.map('map-dist',{zoomControl:true,attributionControl:false});
@@ -297,12 +337,10 @@ function initDistrict(){
   document.getElementById('dMetric').onclick=e=>{const b=e.target.closest('button');if(!b)return;dMetric=b.dataset.v;
     document.querySelectorAll('#dMetric button').forEach(x=>x.classList.toggle('on',x===b));dDraw();};
   document.getElementById('dLabels').onchange=e=>{dLabels=e.target.checked;dDraw();};
-  const empNames=[...new Set(SHOPS.flatMap(s=>s.emps))].sort((a,b)=>a.localeCompare(b));
-  document.getElementById('dEmpList').innerHTML=empNames.map(e=>'<option value="'+esc(e)+'"></option>').join('');
-  document.getElementById('dEmp').oninput=e=>{dEmp=e.target.value.trim();dDraw();};
+  initEmpMulti('dEmpSel',sel=>{dEmpSel=sel;dDraw();});
 }
 function dDraw(){
-  dEmpResolved=resolveEmp();
+  dScoped = dEmpSel.length ? computeScoped(dEmpSel) : null;
   dBreaks=qbreaks(GEO.features.map(dVal));
   if(dLayer)MAPS.dist.removeLayer(dLayer);
   dLayer=L.geoJSON(GEO,{style:f=>({fillColor:dColor(dVal(f)),weight:1,color:cssv('--stroke')||'#fff',fillOpacity:dVal(f)>0?.9:.85}),
@@ -315,15 +353,16 @@ function dDraw(){
     if(html) l.bindTooltip(html,{permanent:true,direction:'center',className:'dlabel'}).openTooltip(); });
   dLegend();
 }
-function dSetInfo(f){const s=dStat(f.properties.district);const em=dEmpResolved&&dEmpResolved!=='__none__';
-  document.getElementById('dInfo').innerHTML='<h3>'+dName(f.properties.district)+'</h3><div class="s">Rajasthan'+(em?(' · '+esc(dEmpResolved)):'')+'</div>'+
+function dSetInfo(f){const s=dStat(f.properties.district);const em=!!dScoped;
+  const who=dEmpSel.length===1?esc(dEmpSel[0]):(dEmpSel.length+' employees');
+  document.getElementById('dInfo').innerHTML='<h3>'+dName(f.properties.district)+'</h3><div class="s">Rajasthan'+(em?(' · '+who):'')+'</div>'+
     '<dl><dt>'+(em?'Retailers visited':'Unique retailers')+'</dt><dd class="ret">'+nf(s.ret)+'</dd>'+
     '<dt>'+(em?'Distributors visited':'Unique distributors')+'</dt><dd class="dist">'+nf(s.dist)+'</dd>'+
-    (em?'':'<dt>Unique employees</dt><dd class="emp">'+nf(s.empN)+'</dd>')+
+    '<dt>'+(em?'Employees here':'Unique employees')+'</dt><dd class="emp">'+nf(s.empN)+'</dd>'+
     '<dt>'+(em?'Their check-ins':'Total check-ins')+'</dt><dd>'+nf(s.checks)+'</dd></dl>'+
-    (s.checks===0?'<div class="s" style="margin-top:6px;color:var(--dist)">'+(em?'No check-in here by this employee':'No check-in — expansion opportunity')+'</div>':'');}
+    (s.checks===0?'<div class="s" style="margin-top:6px;color:var(--dist)">'+(em?'No check-in here by selected':'No check-in — expansion opportunity')+'</div>':'');}
 function dLegend(){const r=DRAMP[dMetric],nm={checks:'Total check-ins',ret:'Unique retailers',dist:'Unique distributors',emp:'Unique employees'}[dMetric];
-  if(dMetric==='ret'&&dEmpResolved===null){ const rr=DRAMP.ret;
+  if(dMetric==='ret'&&!dScoped){ const rr=DRAMP.ret;
     document.getElementById('dLegend').innerHTML='<h4>'+nm+'</h4>'+
       '<div class="row"><span class="sw" style="background:#fca5a5"></span>Under 30 (low)</div>'+
       '<div class="row"><span class="sw" style="background:'+rr[1]+'"></span>30–49</div>'+
@@ -339,7 +378,7 @@ function dLegend(){const r=DRAMP[dMetric],nm={checks:'Total check-ins',ret:'Uniq
   document.getElementById('dLegend').innerHTML=out;}
 
 /* ---------- check-in pin map ---------- */
-let cCluster=null,cHeat=null,cType='all',cView='pins';
+let cCluster=null,cHeat=null,cType='all',cView='pins',cEmpSel=[];
 function initCheckin(){
   MAPS.pin=L.map('map-pin',{preferCanvas:true,zoomControl:true,attributionControl:false}).fitBounds(RJ_BOUNDS);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{subdomains:'abc',maxZoom:19}).addTo(MAPS.pin);
@@ -354,18 +393,16 @@ function initCheckin(){
   const sel=document.getElementById('cDistrict');
   const ds=[...new Set(SHOPS.map(s=>s.dist).filter(Boolean))].map(dName).sort();
   sel.innerHTML='<option value="all">All districts</option>'+ds.map(d=>'<option>'+esc(d)+'</option>').join('');
-  const empNames=[...new Set(SHOPS.flatMap(s=>s.emps))].sort((a,b)=>a.localeCompare(b));
-  document.getElementById('cEmpList').innerHTML=empNames.map(e=>'<option value="'+esc(e)+'"></option>').join('');
   document.getElementById('cType').onclick=e=>{const b=e.target.closest('button');if(!b)return;cType=b.dataset.v;document.querySelectorAll('#cType button').forEach(x=>x.classList.toggle('on',x===b));cDraw();};
   document.getElementById('cView').onclick=e=>{const b=e.target.closest('button');if(!b)return;cView=b.dataset.v;document.querySelectorAll('#cView button').forEach(x=>x.classList.toggle('on',x===b));cDraw();};
-  sel.onchange=cDraw; document.getElementById('cMin').onchange=cDraw; document.getElementById('cEmp').oninput=cDraw;
+  sel.onchange=cDraw; document.getElementById('cMin').onchange=cDraw; initEmpMulti('cEmpSel',s=>{cEmpSel=s;cDraw();});
   cDraw();
 }
 function cDraw(){
   const distSel=document.getElementById('cDistrict').value, minN=Math.max(1,+document.getElementById('cMin').value||1);
-  const empQ=(document.getElementById('cEmp').value||'').trim().toLowerCase();
+  const empSet=new Set(cEmpSel);
   const vis=SHOPS.filter(s=>(cType==='all'||s.t===cType)&&s.n>=minN&&(distSel==='all'||dName(s.dist)===distSel)
-    &&(!empQ||s.emps.some(e=>e.toLowerCase().includes(empQ))));
+    &&(cEmpSel.length===0||s.emps.some(e=>empSet.has(e))));
   cCluster.clearLayers(); if(cHeat){MAPS.pin.removeLayer(cHeat);cHeat=null;}
   const mapped=vis.filter(s=>s.ok);
   if(cView==='pins'){ if(!MAPS.pin.hasLayer(cCluster))MAPS.pin.addLayer(cCluster);
@@ -374,7 +411,7 @@ function cDraw(){
   } else { if(MAPS.pin.hasLayer(cCluster))MAPS.pin.removeLayer(cCluster);
     const mw=Math.max(1,...mapped.map(s=>s.n));
     cHeat=L.heatLayer(mapped.map(s=>[s.la,s.ln,Math.min(1,.25+s.n/mw)]),{radius:20,blur:15}).addTo(MAPS.pin);}
-  const empLbl=empQ?(' visited by "'+document.getElementById('cEmp').value.trim()+'"'):'';
+  const empLbl=cEmpSel.length?(' · by '+(cEmpSel.length===1?cEmpSel[0]:cEmpSel.length+' employees')):'';
   document.getElementById('cNote').textContent=nf(vis.length)+' shops'+empLbl+(vis.length-mapped.length>0?(' · '+(vis.length-mapped.length)+' no coords'):'');
 }
 function cPopup(s){return '<div style="min-width:200px"><b><span class="pill '+s.t+'">'+(s.t==='r'?'Retailer':'Distributor')+'</span> '+esc(s.b)+'</b>'+
@@ -468,10 +505,9 @@ const _parts=location.hash.replace('#','').split(':'), _bt=_parts[0], _bm=_parts
 show(_tabs.includes(_bt)?_bt:'overview');
 if(_bt==='district'){
   if(['checks','ret','dist','emp'].includes(_bm)){dMetric=_bm;document.querySelectorAll('#dMetric button').forEach(x=>x.classList.toggle('on',x.dataset.v===_bm));}
-  if(_parts[2]){const el=document.getElementById('dEmp');if(el){el.value=decodeURIComponent(_parts[2]);dEmp=el.value.trim();}}
-  dDraw();
+  if(_parts[2]&&EMP_CTL['dEmpSel']) EMP_CTL['dEmpSel'].set(decodeURIComponent(_parts[2]).split(',').map(x=>x.trim()).filter(Boolean)); else dDraw();
 }
-if(_bt==='checkin'&&_bm){const el=document.getElementById('cEmp');if(el){el.value=decodeURIComponent(_bm);cDraw();}}
+if(_bt==='checkin'&&_bm&&EMP_CTL['cEmpSel']) EMP_CTL['cEmpSel'].set([decodeURIComponent(_bm)]);
 window.addEventListener('resize',()=>{for(const k in MAPS)if(MAPS[k])MAPS[k].invalidateSize();});
 </script>
 </body>
