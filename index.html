@@ -160,6 +160,7 @@ table.dt tbody tr:hover{background:var(--panel2)}
       <span class="lbl">Type</span>
       <div class="seg types" id="cType"><button data-v="all" class="on">All</button><button data-v="r">Retailers</button><button data-v="d">Distributors</button></div>
       <span class="lbl">District</span><select id="cDistrict"></select>
+      <span class="lbl">Employee</span><input type="search" id="cEmp" list="cEmpList" placeholder="All employees" style="min-width:150px"><datalist id="cEmpList"></datalist>
       <span class="lbl">Min check-ins</span><input type="number" id="cMin" min="1" value="1">
       <div class="seg" id="cView"><button data-v="pins" class="on">Pins</button><button data-v="heat">Heatmap</button></div>
     </div>
@@ -342,14 +343,18 @@ function initCheckin(){
   const sel=document.getElementById('cDistrict');
   const ds=[...new Set(SHOPS.map(s=>s.dist).filter(Boolean))].map(dName).sort();
   sel.innerHTML='<option value="all">All districts</option>'+ds.map(d=>'<option>'+esc(d)+'</option>').join('');
+  const empNames=[...new Set(SHOPS.flatMap(s=>s.emps))].sort((a,b)=>a.localeCompare(b));
+  document.getElementById('cEmpList').innerHTML=empNames.map(e=>'<option value="'+esc(e)+'"></option>').join('');
   document.getElementById('cType').onclick=e=>{const b=e.target.closest('button');if(!b)return;cType=b.dataset.v;document.querySelectorAll('#cType button').forEach(x=>x.classList.toggle('on',x===b));cDraw();};
   document.getElementById('cView').onclick=e=>{const b=e.target.closest('button');if(!b)return;cView=b.dataset.v;document.querySelectorAll('#cView button').forEach(x=>x.classList.toggle('on',x===b));cDraw();};
-  sel.onchange=cDraw; document.getElementById('cMin').onchange=cDraw;
+  sel.onchange=cDraw; document.getElementById('cMin').onchange=cDraw; document.getElementById('cEmp').oninput=cDraw;
   cDraw();
 }
 function cDraw(){
   const distSel=document.getElementById('cDistrict').value, minN=Math.max(1,+document.getElementById('cMin').value||1);
-  const vis=SHOPS.filter(s=>(cType==='all'||s.t===cType)&&s.n>=minN&&(distSel==='all'||dName(s.dist)===distSel));
+  const empQ=(document.getElementById('cEmp').value||'').trim().toLowerCase();
+  const vis=SHOPS.filter(s=>(cType==='all'||s.t===cType)&&s.n>=minN&&(distSel==='all'||dName(s.dist)===distSel)
+    &&(!empQ||s.emps.some(e=>e.toLowerCase().includes(empQ))));
   cCluster.clearLayers(); if(cHeat){MAPS.pin.removeLayer(cHeat);cHeat=null;}
   const mapped=vis.filter(s=>s.ok);
   if(cView==='pins'){ if(!MAPS.pin.hasLayer(cCluster))MAPS.pin.addLayer(cCluster);
@@ -358,7 +363,8 @@ function cDraw(){
   } else { if(MAPS.pin.hasLayer(cCluster))MAPS.pin.removeLayer(cCluster);
     const mw=Math.max(1,...mapped.map(s=>s.n));
     cHeat=L.heatLayer(mapped.map(s=>[s.la,s.ln,Math.min(1,.25+s.n/mw)]),{radius:20,blur:15}).addTo(MAPS.pin);}
-  document.getElementById('cNote').textContent=nf(vis.length)+' shops'+(vis.length-mapped.length>0?(' · '+(vis.length-mapped.length)+' without coords'):'');
+  const empLbl=empQ?(' visited by "'+document.getElementById('cEmp').value.trim()+'"'):'';
+  document.getElementById('cNote').textContent=nf(vis.length)+' shops'+empLbl+(vis.length-mapped.length>0?(' · '+(vis.length-mapped.length)+' no coords'):'');
 }
 function cPopup(s){return '<div style="min-width:200px"><b><span class="pill '+s.t+'">'+(s.t==='r'?'Retailer':'Distributor')+'</span> '+esc(s.b)+'</b>'+
   '<div class="muted" style="font-size:11px;margin:3px 0 6px">'+[s.c,dName(s.dist)].filter(Boolean).join(' · ')+'</div>'+
@@ -451,6 +457,7 @@ const [_bt,_bm]=location.hash.replace('#','').split(':');
 show(_tabs.includes(_bt)?_bt:'overview');
 if(_bt==='district'&&['checks','ret','dist','emp'].includes(_bm)){dMetric=_bm;
   document.querySelectorAll('#dMetric button').forEach(x=>x.classList.toggle('on',x.dataset.v===_bm));dDraw();}
+if(_bt==='checkin'&&_bm){const el=document.getElementById('cEmp');if(el){el.value=decodeURIComponent(_bm);cDraw();}}
 window.addEventListener('resize',()=>{for(const k in MAPS)if(MAPS[k])MAPS[k].invalidateSize();});
 </script>
 </body>
