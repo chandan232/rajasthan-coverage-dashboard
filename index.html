@@ -90,6 +90,14 @@ input[type=number]{width:66px}
 .msellist{max-height:230px;overflow:auto;display:flex;flex-direction:column;gap:1px}
 .mrow{display:flex;align-items:center;gap:7px;padding:4px 6px;border-radius:6px;font-size:12.5px;cursor:pointer}
 .mrow:hover{background:var(--panel2)} .mrow input{flex:0 0 auto}
+.modal{position:fixed;inset:0;z-index:3000;background:rgba(2,6,20,.62);display:flex;align-items:center;justify-content:center;padding:18px}
+.modal-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);width:min(760px,95vw);max-height:86vh;display:flex;flex-direction:column;padding:16px 18px;position:relative}
+.modal-x{position:absolute;right:12px;top:12px;background:var(--panel2);border:1px solid var(--line);color:var(--fg);border-radius:8px;width:30px;height:30px;cursor:pointer;font-size:14px}
+.modal-card h3{font-size:17px;font-weight:800;padding-right:34px}
+.modal-sub{color:var(--muted);font-size:12px;margin-top:2px}
+.modal-body{overflow:auto;border:1px solid var(--line);border-radius:10px;min-height:0}
+.modal-body table.dt{border:0;border-radius:0}
+.modal-body thead th{position:sticky;top:0}
 .mapwrapper{position:absolute;top:46px;left:0;right:0;bottom:0}
 /* info/legend overlays */
 .legend{position:absolute;left:12px;bottom:12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 11px;z-index:700;font-size:11.5px;box-shadow:var(--shadow)}
@@ -199,6 +207,16 @@ table.dt tbody tr:hover{background:var(--panel2)}
   <section class="panel" id="p-distributors"></section>
 </div>
 
+<div class="modal" id="shopModal" hidden>
+  <div class="modal-card">
+    <button class="modal-x" id="smClose" aria-label="Close">✕</button>
+    <h3 id="smTitle"></h3>
+    <div class="modal-sub" id="smSub"></div>
+    <div class="seg" id="smType" style="margin:10px 0 8px"><button data-t="r" class="on">Retailers</button><button data-t="d">Distributors</button></div>
+    <input type="search" id="smQ" placeholder="Search name / city / employee…" style="width:100%;margin-bottom:8px">
+    <div class="modal-body"><table class="dt"><thead id="smHead"></thead><tbody id="smBody"></tbody></table></div>
+  </div>
+</div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
@@ -338,6 +356,33 @@ function initDistrict(){
     document.querySelectorAll('#dMetric button').forEach(x=>x.classList.toggle('on',x===b));dDraw();};
   document.getElementById('dLabels').onchange=e=>{dLabels=e.target.checked;dDraw();};
   initEmpMulti('dEmpSel',sel=>{dEmpSel=sel;dDraw();});
+  document.getElementById('smClose').onclick=()=>document.getElementById('shopModal').hidden=true;
+  document.getElementById('shopModal').onclick=e=>{if(e.target.id==='shopModal')document.getElementById('shopModal').hidden=true;};
+  document.getElementById('smType').onclick=e=>{const b=e.target.closest('button');if(!b)return;smType=b.dataset.t;
+    document.querySelectorAll('#smType button').forEach(x=>x.classList.toggle('on',x===b));renderShopModal();};
+  document.getElementById('smQ').oninput=renderShopModal;
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')document.getElementById('shopModal').hidden=true;});
+}
+let smDistrict=null, smType='r';
+function openDistrictModal(name){ smDistrict=name; smType=(dMetric==='dist')?'d':'r';
+  document.querySelectorAll('#smType button').forEach(x=>x.classList.toggle('on',x.dataset.t===smType));
+  document.getElementById('smQ').value=''; renderShopModal();
+  document.getElementById('shopModal').hidden=false; }
+function renderShopModal(){
+  const set=new Set(dEmpSel), label=smType==='r'?'Retailer':'Distributor';
+  const q=document.getElementById('smQ').value.trim().toLowerCase();
+  let rows=SHOPS.filter(s=>s.dist===smDistrict&&s.t===smType&&(dEmpSel.length===0||s.emps.some(e=>set.has(e))));
+  if(q) rows=rows.filter(s=>(s.b+' '+(s.c||'')+' '+(s.as||'')+' '+(s.vi||'')).toLowerCase().includes(q));
+  rows.sort((a,b)=>b.n-a.n);
+  const nR=SHOPS.filter(s=>s.dist===smDistrict&&s.t==='r'&&(dEmpSel.length===0||s.emps.some(e=>set.has(e)))).length;
+  const nD=SHOPS.filter(s=>s.dist===smDistrict&&s.t==='d'&&(dEmpSel.length===0||s.emps.some(e=>set.has(e)))).length;
+  document.querySelector('#smType button[data-t="r"]').textContent='Retailers ('+nf(nR)+')';
+  document.querySelector('#smType button[data-t="d"]').textContent='Distributors ('+nf(nD)+')';
+  const emLbl=dEmpSel.length?(' · '+(dEmpSel.length===1?dEmpSel[0]:dEmpSel.length+' employees')):'';
+  document.getElementById('smTitle').textContent=dName(smDistrict);
+  document.getElementById('smSub').textContent='Rajasthan'+emLbl+' · '+nf(rows.length)+' '+label.toLowerCase()+(rows.length===1?'':'s')+' shown';
+  document.getElementById('smHead').innerHTML='<tr><th class="l">'+label+'</th><th class="l">City</th><th>Check-ins</th><th class="l">Assigned</th><th class="l">Visited by</th><th class="l">Latest</th></tr>';
+  document.getElementById('smBody').innerHTML=rows.map(s=>'<tr><td class="l">'+esc(s.b)+'</td><td class="l muted">'+esc(s.c||'—')+'</td><td class="tnum">'+nf(s.n)+'</td><td class="l muted">'+esc(s.as||'—')+'</td><td class="l muted" style="max-width:180px;overflow:hidden;text-overflow:ellipsis">'+esc(s.vi||'—')+'</td><td class="l muted">'+fmtD(s.l)+'</td></tr>').join('')||'<tr><td class="l muted" colspan="6" style="padding:16px">No '+label.toLowerCase()+'s'+emLbl+' in '+esc(dName(smDistrict))+'</td></tr>';
 }
 function dDraw(){
   dScoped = dEmpSel.length ? computeScoped(dEmpSel) : null;
@@ -345,7 +390,7 @@ function dDraw(){
   if(dLayer)MAPS.dist.removeLayer(dLayer);
   dLayer=L.geoJSON(GEO,{style:f=>({fillColor:dColor(dVal(f)),weight:1,color:cssv('--stroke')||'#fff',fillOpacity:dVal(f)>0?.9:.85}),
     onEachFeature:(f,l)=>{ l.on('mouseover',()=>{l.setStyle({weight:2.5,color:cssv('--accent')});l.bringToFront();dSetInfo(f);});
-      l.on('mouseout',()=>dLayer.resetStyle(l)); l.on('click',()=>MAPS.dist.fitBounds(l.getBounds(),{padding:[30,30],maxZoom:9}));}}).addTo(MAPS.dist);
+      l.on('mouseout',()=>dLayer.resetStyle(l)); l.on('click',()=>openDistrictModal(f.properties.district));}}).addTo(MAPS.dist);
   dLayer.eachLayer(l=>{ const f=l.feature,n=f.properties.district,v=dVal(f);
     const num=v>0?'<span style="font-size:12.5px;font-weight:800">'+nf(v)+'</span>':'';
     const nm=dLabels?'<span style="font-size:8.5px;font-weight:600;opacity:.95">'+dName(n)+'</span>':'';
@@ -506,6 +551,7 @@ show(_tabs.includes(_bt)?_bt:'overview');
 if(_bt==='district'){
   if(['checks','ret','dist','emp'].includes(_bm)){dMetric=_bm;document.querySelectorAll('#dMetric button').forEach(x=>x.classList.toggle('on',x.dataset.v===_bm));}
   if(_parts[2]&&EMP_CTL['dEmpSel']) EMP_CTL['dEmpSel'].set(decodeURIComponent(_parts[2]).split(',').map(x=>x.trim()).filter(Boolean)); else dDraw();
+  if(_parts[3]) openDistrictModal(decodeURIComponent(_parts[3]));
 }
 if(_bt==='checkin'&&_bm&&EMP_CTL['cEmpSel']) EMP_CTL['cEmpSel'].set([decodeURIComponent(_bm)]);
 window.addEventListener('resize',()=>{for(const k in MAPS)if(MAPS[k])MAPS[k].invalidateSize();});
