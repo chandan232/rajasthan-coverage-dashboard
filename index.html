@@ -390,7 +390,7 @@ function dDraw(){
   if(dLayer)MAPS.dist.removeLayer(dLayer);
   dLayer=L.geoJSON(GEO,{style:f=>({fillColor:dColor(dVal(f)),weight:1,color:cssv('--stroke')||'#fff',fillOpacity:dVal(f)>0?.9:.85}),
     onEachFeature:(f,l)=>{ l.on('mouseover',()=>{l.setStyle({weight:2.5,color:cssv('--accent')});l.bringToFront();dSetInfo(f);});
-      l.on('mouseout',()=>dLayer.resetStyle(l)); l.on('click',()=>openDistrictModal(f.properties.district));}}).addTo(MAPS.dist);
+      l.on('mouseout',()=>dLayer.resetStyle(l)); l.on('click',()=>MAPS.dist.fitBounds(l.getBounds(),{padding:[30,30],maxZoom:9}));}}).addTo(MAPS.dist);
   dLayer.eachLayer(l=>{ const f=l.feature,n=f.properties.district,v=dVal(f);
     const num=v>0?'<span style="font-size:12.5px;font-weight:800">'+nf(v)+'</span>':'';
     const nm=dLabels?'<span style="font-size:8.5px;font-weight:600;opacity:.95">'+dName(n)+'</span>':'';
