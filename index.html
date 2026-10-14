@@ -160,6 +160,7 @@ table.dt tbody tr:hover{background:var(--panel2)}
       </div>
       <label class="lbl" style="display:flex;gap:5px;align-items:center;text-transform:none;font-size:12.5px;color:var(--fg)"><input type="checkbox" id="dLabels" checked> Names</label>
       <span class="lbl">Employee</span><div class="msel" id="dEmpSel"></div>
+      <span class="lbl">Dates</span><select id="dFrom"></select><span class="lbl" style="opacity:.55;padding:0 1px">to</span><select id="dTo"></select>
     </div>
     <div class="mapwrapper"><div class="lmap" id="map-dist"></div>
       <div class="info" id="dInfo"><h3>Hover a district</h3><div class="s">retailers · distributors · employees · check-ins</div></div>
@@ -312,7 +313,7 @@ function initEmpMulti(rootId,onChange){
   EMP_CTL[rootId]=api;return api;
 }
 
-let dLayer=null, dMetric='checks', dLabels=true, dBreaks=[], dEmpSel=[], dScoped=null;
+let dLayer=null, dMetric='checks', dLabels=true, dBreaks=[], dEmpSel=[], dScoped=null, dFrom=null, dTo=null, dDateActive=false;
 const DRAMP={checks:['#e0e7ff','#c7d2fe','#a5b4fc','#818cf8','#6366f1','#4338ca'],ret:['#dbeafe','#bfdbfe','#93c5fd','#60a5fa','#3b82f6','#1d4ed8'],dist:['#ffedd5','#fed7aa','#fdba74','#fb923c','#f97316','#c2410c'],emp:['#d1fae5','#a7f3d0','#6ee7b7','#34d399','#10b981','#047857']};
 // Union of selected employees per district: unique shops from SHOPS (so a shop visited by two picks counts once), check-ins summed from EMPDIST (additive).
 function computeScoped(sel){
@@ -321,6 +322,20 @@ function computeScoped(sel){
   for(const s of SHOPS){ if(!s.dist||!agg[s.dist]) continue; if(s.emps.some(e=>set.has(e))){ if(s.t==='r')agg[s.dist].ret++; else agg[s.dist].dist++; } }
   for(const e of sel){ const ed=EMPDIST[e]; if(!ed) continue; for(const d in ed){ if(agg[d]) agg[d].checks+=ed[d][2]; } }
   for(const n of dnames) agg[n].empN=sel.filter(e=>EMPDIST[e]&&EMPDIST[e][n]).length;
+  return agg;
+}
+// Windowed (date range, optionally + employees): recompute from each shop's monthly check-ins (m).
+function computeWindowed(sel, fromYm, toYm){
+  const useEmp=sel.length>0, set=new Set(sel), agg={}, es={};
+  for(const n of dnames) agg[n]={ret:0,dist:0,checks:0,empN:0};
+  for(const s of SHOPS){ if(!s.dist||!agg[s.dist]) continue;
+    if(useEmp && !s.emps.some(e=>set.has(e))) continue;
+    let w=0; for(const ym in s.m){ if(ym>=fromYm && ym<=toYm) w+=s.m[ym]; }
+    if(w<=0) continue;
+    const a=agg[s.dist]; if(s.t==='r')a.ret++; else a.dist++; a.checks+=w;
+    (es[s.dist]=es[s.dist]||new Set()); for(const e of s.emps){ if(!useEmp||set.has(e)) es[s.dist].add(e); }
+  }
+  for(const n of dnames) agg[n].empN=es[n]?es[n].size:0;
   return agg;
 }
 function dStat(name){ return dScoped?dScoped[name]:dAgg[name]; }
@@ -338,9 +353,16 @@ function initDistrict(){
     document.querySelectorAll('#dMetric button').forEach(x=>x.classList.toggle('on',x===b));dDraw();};
   document.getElementById('dLabels').onchange=e=>{dLabels=e.target.checked;dDraw();};
   initEmpMulti('dEmpSel',sel=>{dEmpSel=sel;dDraw();});
+  dFrom=months[0]; dTo=months[months.length-1];
+  const dopt=m=>'<option value="'+m+'">'+fmtM(m)+'</option>';
+  document.getElementById('dFrom').innerHTML=months.map(dopt).join(''); document.getElementById('dFrom').value=dFrom;
+  document.getElementById('dTo').innerHTML=months.map(dopt).join(''); document.getElementById('dTo').value=dTo;
+  document.getElementById('dFrom').onchange=e=>{dFrom=e.target.value; if(dFrom>dTo){dTo=dFrom;document.getElementById('dTo').value=dTo;} dDraw();};
+  document.getElementById('dTo').onchange=e=>{dTo=e.target.value; if(dTo<dFrom){dFrom=dTo;document.getElementById('dFrom').value=dFrom;} dDraw();};
 }
 function dDraw(){
-  dScoped = dEmpSel.length ? computeScoped(dEmpSel) : null;
+  dDateActive = dFrom && dTo && !(dFrom===months[0] && dTo===months[months.length-1]);
+  dScoped = dDateActive ? computeWindowed(dEmpSel, dFrom, dTo) : (dEmpSel.length ? computeScoped(dEmpSel) : null);
   dBreaks=qbreaks(GEO.features.map(dVal));
   if(dLayer)MAPS.dist.removeLayer(dLayer);
   dLayer=L.geoJSON(GEO,{style:f=>({fillColor:dColor(dVal(f)),weight:1,color:cssv('--stroke')||'#fff',fillOpacity:dVal(f)>0?.9:.85}),
@@ -353,14 +375,16 @@ function dDraw(){
     if(html) l.bindTooltip(html,{permanent:true,direction:'center',className:'dlabel'}).openTooltip(); });
   dLegend();
 }
-function dSetInfo(f){const s=dStat(f.properties.district);const em=!!dScoped;
-  const who=dEmpSel.length===1?esc(dEmpSel[0]):(dEmpSel.length+' employees');
-  document.getElementById('dInfo').innerHTML='<h3>'+dName(f.properties.district)+'</h3><div class="s">Rajasthan'+(em?(' · '+who):'')+'</div>'+
+function dSetInfo(f){const s=dStat(f.properties.district);const em=dEmpSel.length>0;
+  const sub=['Rajasthan'];
+  if(em) sub.push(dEmpSel.length===1?esc(dEmpSel[0]):dEmpSel.length+' employees');
+  if(dDateActive) sub.push(fmtM(dFrom)+' – '+fmtM(dTo));
+  document.getElementById('dInfo').innerHTML='<h3>'+dName(f.properties.district)+'</h3><div class="s">'+sub.join(' · ')+'</div>'+
     '<dl><dt>'+(em?'Retailers visited':'Unique retailers')+'</dt><dd class="ret">'+nf(s.ret)+'</dd>'+
     '<dt>'+(em?'Distributors visited':'Unique distributors')+'</dt><dd class="dist">'+nf(s.dist)+'</dd>'+
     '<dt>'+(em?'Employees here':'Unique employees')+'</dt><dd class="emp">'+nf(s.empN)+'</dd>'+
     '<dt>'+(em?'Their check-ins':'Total check-ins')+'</dt><dd>'+nf(s.checks)+'</dd></dl>'+
-    (s.checks===0?'<div class="s" style="margin-top:6px;color:var(--dist)">'+(em?'No check-in here by selected':'No check-in — expansion opportunity')+'</div>':'');}
+    (s.checks===0?'<div class="s" style="margin-top:6px;color:var(--dist)">No check-in in this view</div>':'');}
 function dLegend(){const r=DRAMP[dMetric],nm={checks:'Total check-ins',ret:'Unique retailers',dist:'Unique distributors',emp:'Unique employees'}[dMetric];
   if(dMetric==='ret'&&!dScoped){ const rr=DRAMP.ret;
     document.getElementById('dLegend').innerHTML='<h4>'+nm+'</h4>'+
@@ -506,6 +530,7 @@ show(_tabs.includes(_bt)?_bt:'overview');
 if(_bt==='district'){
   if(['checks','ret','dist','emp'].includes(_bm)){dMetric=_bm;document.querySelectorAll('#dMetric button').forEach(x=>x.classList.toggle('on',x.dataset.v===_bm));}
   if(_parts[2]&&EMP_CTL['dEmpSel']) EMP_CTL['dEmpSel'].set(decodeURIComponent(_parts[2]).split(',').map(x=>x.trim()).filter(Boolean)); else dDraw();
+  if(_parts[3]&&_parts[4]){dFrom=_parts[3];dTo=_parts[4];const ff=document.getElementById('dFrom'),tt=document.getElementById('dTo');if(ff)ff.value=dFrom;if(tt)tt.value=dTo;dDraw();}
 }
 if(_bt==='checkin'&&_bm&&EMP_CTL['cEmpSel']) EMP_CTL['cEmpSel'].set([decodeURIComponent(_bm)]);
 window.addEventListener('resize',()=>{for(const k in MAPS)if(MAPS[k])MAPS[k].invalidateSize();});
